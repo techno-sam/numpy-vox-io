@@ -2,3 +2,5 @@
 *pyc
 __pycache__
 /build
+/dist/
+/numpy_vox_io.egg-info/

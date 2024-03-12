@@ -51,7 +51,7 @@ class VoxWriter(object):
             chunks.append((b'RGBA', b''.join(pack('BBBB', *c) for c in self.vox.palette)))
 
         for m in self.vox.materials:
-            chunks.append((b'MATT', pack('iif', m.id, m.type, m.weight) + self._matflags(m.props)))
+            chunks.append((b'MATT', pack('iif', m.chunk_id, m.type, m.weight) + self._matflags(m.props)))
 
         # TODO materials
 

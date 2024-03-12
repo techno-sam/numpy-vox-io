@@ -19,12 +19,12 @@ def find_version(*file_paths):
     raise RuntimeError("Unable to find version string.")
 
 
-setup(name='py-vox-io',
+setup(name='numpy-vox-io',
       version=find_version('pyvox', '__init__.py'),
       description='A Python parser/write for the MagicaVoxel .vox format',
-      author='Gunnar Aastrand Grimnes',
-      author_email='gromgull@gmail.com',
-      url='https://github.com/gromgull/py-vox-io/',
+      author='Sam Wagenaar',
+      author_email='77073745+techno-sam@users.noreply.github.com',
+      url='https://github.com/techno-sam/numpy-vox-io',
       packages=find_packages(),
-      license='BSD',
+      license='MIT',
      )
