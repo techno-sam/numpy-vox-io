@@ -1,13 +1,15 @@
 from struct import unpack_from as unpack, calcsize
 import logging
 
-from .models import Vox, Size, Voxel, Color, Model, Material
+from .models import Vox, Size, Voxel, Color, Model, Material, nTrn, nGrp, nShp, ShapeModelEntry, Layer, Camera, Frame, Transform, Group, Shape
 
 # File format:
 # https://github.com/ephtracy/voxel-model/blob/master/MagicaVoxel-file-format-vox.txt
 # https://github.com/ephtracy/voxel-model/blob/master/MagicaVoxel-file-format-vox-extension.txt
 
 log = logging.getLogger(__name__)
+#log.setLevel('DEBUG')
+log.addHandler(logging.StreamHandler())
 
 class ParsingException(Exception): pass
 
@@ -23,7 +25,8 @@ def read_string(buf: bytes | bytearray | memoryview, offset: int) -> tuple[str, 
     """
     size, = unpack('I', buf, offset)
     offset += 4
-    string, = unpack(f'{size}s', buf, offset)#sum(chr(v) for v in unpack(f"{size}B", buf, offset))
+    string: bytes = unpack(f'{size}s', buf, offset)[0]#sum(chr(v) for v in unpack(f"{size}B", buf, offset))
+    string: str = string.decode('utf-8')
     offset += size
     return string, offset
 
@@ -61,7 +64,7 @@ class Chunk(object):
         if chunk_id == b'MAIN':
             if len(self.content): raise ParsingException('Non-empty content for main chunk')
         elif chunk_id == b'PACK':
-            self.models = unpack('I', content)[0]
+            self.models = unpack('i', content)[0]
         elif chunk_id == b'SIZE':
             self.size = Size(*unpack('III', content))
         elif chunk_id == b'XYZI':
@@ -91,29 +94,71 @@ class Chunk(object):
                     offset += 4
 
             self.material = Material(_id, _type, weight, props)
-        # todo actually parse these
         elif chunk_id == b'nTRN':
-            self.todo = True
+            _id, = unpack('i', content)
+            offset = 4
+            attributes, offset = read_dict(content, offset)
+            child_id, = unpack('i', content, offset)
+            offset += 4
+            reserved_id, = unpack('i', content, offset)
+            offset += 4
+            layer_id, = unpack('i', content, offset)
+            offset += 4
+            frame_count, = unpack('i', content, offset)
+            offset += 4
+            frames: list[Frame] = []
+            for _ in range(frame_count):
+                frame_attributes, offset = read_dict(content, offset)
+                frames.append(Frame(frame_attributes))
+            self.node_transform = nTrn(_id, attributes, child_id, reserved_id, layer_id, frame_count, frames)
         elif chunk_id == b'nGRP':
-            self.todo = True
+            _id, = unpack('i', content)
+            offset = 4
+            attributes, offset = read_dict(content, offset)
+            num_children, = unpack('i', content, offset)
+            offset += 4
+            child_ids: list[int] = []
+            for _ in range(num_children):
+                child_ids.append(unpack('i', content, offset)[0])
+                offset += 4
+            self.node_group = nGrp(_id, attributes, num_children, child_ids)
         elif chunk_id == b'nSHP':
-            self.todo = True
+            _id, = unpack('i', content)
+            offset = 4
+            attributes, offset = read_dict(content, offset)
+            num_models, = unpack('i', content, offset)
+            offset += 4
+            models: list[ShapeModelEntry] = []
+            for _ in range(num_models):
+                model_id, = unpack('i', content, offset)
+                offset += 4
+                model_attributes, offset = read_dict(content, offset)
+                models.append(ShapeModelEntry(model_id, model_attributes))
+            self.node_shape = nShp(_id, attributes, num_models, models)
         elif chunk_id == b'MATL':
             self.material_id, = unpack('I', content)
             self.material_properties, _ = read_dict(content, 4)
         elif chunk_id == b'LAYR':
-            self.todo = True
+            _id, = unpack('i', content)
+            offset = 4
+            attributes, offset = read_dict(content, offset)
+            reserved_id, = unpack('i', content, offset)
+            self.layer = Layer(_id, attributes, reserved_id)
         elif chunk_id == b'rOBJ':
             self.rendering_attributes, _ = read_dict(content, 0)
         elif chunk_id == b'rCAM':
-            self.todo = True
+            _id, = unpack('i', content)
+            offset = 4
+            attributes, offset = read_dict(content, offset)
+            self.camera = Camera(_id, attributes)
         elif chunk_id == b'NOTE':
-            count, = unpack('I', content)
+            count, = unpack('i', content)
             offset = 4
             self.color_names: list[str] = []
             for _ in range(count):
                 name, offset = read_string(content, offset)
                 self.color_names.append(name)
+        # todo parse
         elif chunk_id == b'IMAP':
             self.todo = True
         else:
@@ -124,7 +169,9 @@ class Chunk(object):
         out = {}
         banned = ["chunk_id", "content", "chunks"]
         for k, v in self.__dict__.items():
-            if k not in banned:
+            if k == "voxels":
+                out[k] = "[...]"
+            elif k not in banned:
                 out[k] = v
         return out
 
@@ -133,6 +180,29 @@ class Chunk(object):
 
     def __str__(self):
         return repr(self)
+
+
+def _parse_transform(id_: int, elements: dict[int, nTrn | nGrp | nShp]) -> Transform:
+    dat = elements[id_]
+    child = elements[dat.child_id] if dat.child_id in elements else None
+    if isinstance(child, nTrn):
+        child = _parse_transform(child.id, elements)
+    elif isinstance(child, nGrp):
+        child = _parse_group(child.id, elements)
+    elif isinstance(child, nShp):
+        child = _parse_shape(child.id, elements)
+    return Transform(dat.id, dat.attributes, child, dat.reserved_id, dat.layer_id, dat.frames)
+
+def _parse_group(id_: int, elements: dict[int, nTrn | nGrp | nShp]) -> Group:
+    dat = elements[id_]
+    children = [ _parse_transform(child_id, elements) for child_id in dat.child_ids ]
+    return Group(dat.id, dat.attributes, children)
+
+def _parse_shape(id_: int, elements: dict[int, nTrn | nGrp | nShp]) -> Shape:
+    dat = elements[id_]
+    models = [ ShapeModelEntry(model_id, model_attributes) for model_id, model_attributes in dat.models ]
+    return Shape(dat.id, dat.attributes, models)
+
 
 class VoxParser(object):
 
@@ -181,6 +251,7 @@ class VoxParser(object):
                 models: int = 1
 
             log.debug("file has %d models", models)
+            log.debug("remaining chunks: [%s]", "\n\t".join(str(c) for c in chunks))
 
             models: list[Model] = [ self._parseModel(chunks.pop(), chunks.pop()) for _ in range(models) ]
 
@@ -197,9 +268,19 @@ class VoxParser(object):
                     if c.chunk_id == b'MATL':
                         materials[c.material_id - 1] = c.material_properties
 
-            return Vox(models, palette, materials)
+            root_transform = None
+            transform_elements: dict[int, nTrn|nGrp|nShp] = {}
+            for c in chunks:
+                if c.chunk_id == b'nTRN':
+                    transform_elements[c.node_transform.id] = c.node_transform
+                elif c.chunk_id == b'nGRP':
+                    transform_elements[c.node_group.id] = c.node_group
+                elif c.chunk_id == b'nSHP':
+                    transform_elements[c.node_shape.id] = c.node_shape
 
+            root_transform = _parse_transform(0, transform_elements)
 
+            return Vox(models, palette, materials, root_transform)
 
     def _parseModel(self, size, xyzi):
         if size.chunk_id != b'SIZE': raise ParsingException('Expected SIZE chunk, got %s', size.chunk_id)

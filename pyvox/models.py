@@ -8,6 +8,52 @@ Color = namedtuple('Color', 'r g b a')
 Voxel = namedtuple('Voxel', 'x y z c')
 Model = namedtuple('Model', 'size voxels')
 Material = namedtuple('Material', 'id type weight props')
+nTrn = namedtuple('nTrn', 'id attributes child_id reserved_id layer_id num_frames frames')
+nGrp = namedtuple('nGrp', 'id attributes num_children child_ids')
+nShp = namedtuple('nShp', 'id attributes num_models models')
+ShapeModelEntry = namedtuple('ShapeModelEntry', 'model_id attributes')
+Layer = namedtuple('Layer', 'id attributes reserved_id')
+Camera = namedtuple('Camera', 'id attributes')
+Frame = namedtuple('Frame', 'attributes')
+
+class Transform:
+    def __init__(self, id_: int, attributes: dict[str, str], child: 'Transform|Group|Shape', reserved_id: int, layer_id: int, frames: list[Frame]):
+        self.id_ = id_
+        self.attributes = attributes
+        self.child = child
+        self.reserved_id = reserved_id
+        self.layer_id = layer_id
+        self.frames = frames
+
+    def __repr__(self):
+        return str(self)
+
+    def __str__(self):
+        return f"Transform({self.id_}, {self.attributes}, {type(self.child)}#{self.child.id_})"
+
+class Group:
+    def __init__(self, id_: int, attributes: dict[str, str], children: list['Transform']):
+        self.id_ = id_
+        self.attributes = attributes
+        self.children = children
+
+    def __repr__(self):
+        return str(self)
+
+    def __str__(self):
+        return f"Group({self.id_}, {self.attributes}, [{', '.join([f'{type(child)}#{child.id_}' for child in self.children])}])"
+
+class Shape:
+    def __init__(self, id_: int, attributes: dict[str, str], models: list[ShapeModelEntry]):
+        self.id_ = id_
+        self.attributes = attributes
+        self.models = models
+
+    def __repr__(self):
+        return str(self)
+
+    def __str__(self):
+        return f"Shape({self.id_}, {self.attributes}, {self.models})"
 
 def get_default_palette():
     return [ Color( *tuple(i.to_bytes(4,'little')) ) for i in default_palette ]
@@ -15,18 +61,22 @@ def get_default_palette():
 
 class Vox(object):
 
-    def __init__(self, models, palette=None, materials=None):
-        self.models = models
-        self.default_palette = not palette
-        self._palette = palette or get_default_palette()
-        self.materials = materials or []
+    def __init__(
+            self, models: list[Model], palette: list[Color]|None = None,
+            materials: list[Material]|None = None, root_transform: Transform|None = None
+    ):
+        self.models: list[Model] = models
+        self.default_palette: bool = not palette
+        self._palette: list[Color] = palette or get_default_palette()
+        self.materials: list[Material] = materials or []
+        self.root_transform: Transform|None = root_transform
 
     @property
-    def palette(self):
+    def palette(self) -> list[Color]:
         return self._palette
 
     @palette.setter
-    def palette(self, val):
+    def palette(self, val: list[Color]):
         self._palette = val
         self.default_palette = False
 
